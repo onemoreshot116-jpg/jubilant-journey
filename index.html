@@ -45,6 +45,18 @@
   }
   .sync-btn:hover { background: #f0f1f3; }
 
+  .share-panel {
+    margin: 0 14px 14px; padding: 12px 14px; background: #f5f7fb; border: 1px solid #e1e5ec;
+    border-radius: 10px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .share-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .share-status { font-size: 12px; color: #5f6368; }
+  .share-input {
+    flex: 1; min-width: 220px; border: 1px solid #d8dadf; border-radius: 8px;
+    padding: 7px 10px; font-size: 12px; color: #2b2d31;
+  }
+  .share-hint { font-size: 11px; color: #9aa0a6; line-height: 1.5; }
+
   .app-layout { flex: 1; display: flex; min-height: 0; }
   .board-wrap { flex: 1; overflow: auto; padding: 20px; min-width: 0; }
   .board {
@@ -198,9 +210,27 @@
   <div class="sync-bar">
     <span class="sync-status" id="syncStatus">⚪ 동기화 파일이 연결되지 않았습니다 (이 기기에만 저장됨)</span>
     <button class="sync-btn" id="syncConnectBtn">🔗 동기화 파일 연결</button>
+    <button class="sync-btn" id="shareToggleBtn">👥 공동 사용</button>
   </div>
   <button class="add-session-btn" id="addSessionBtn">+ 새 세션 추가</button>
 </header>
+<div class="share-panel" id="sharePanel" style="display:none;">
+  <div class="share-row">
+    <span class="share-status" id="shareStatus">⚪ 로그인하지 않았습니다</span>
+    <button class="sync-btn" id="shareLoginBtn">🔐 구글 계정으로 로그인</button>
+    <button class="sync-btn" id="shareLogoutBtn" style="display:none;">로그아웃</button>
+  </div>
+  <div class="share-row" id="shareConnectRow" style="display:none;">
+    <input type="text" class="share-input" id="shareFileIdInput" placeholder="공유 파일 ID 또는 드라이브 링크를 붙여넣기">
+    <button class="sync-btn" id="shareConnectBtn">연결</button>
+    <button class="sync-btn" id="shareCreateBtn">➕ 새 공유 파일 만들기</button>
+  </div>
+  <div class="share-row">
+    <span class="share-status" id="shareFileInfo" style="display:none;"></span>
+    <button class="sync-btn" id="shareDisconnectBtn" style="display:none;">연결 해제</button>
+  </div>
+  <div class="share-hint">같은 공유 파일에 연결한 사람들끼리 할 일이 자동으로 동기화됩니다. 새로 만든 뒤 구글 드라이브에서 "공유" 버튼으로 함께 쓸 사람을 초대하세요.</div>
+</div>
 
 <div class="app-layout">
   <main class="board-wrap">
@@ -295,6 +325,7 @@
   function save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     scheduleSyncWrite();
+    scheduleShareWrite();
   }
 
   // ---- 외부 동기화 (구글 드라이브 동기화 폴더의 JSON 파일과 연동) ----
@@ -508,6 +539,338 @@
         }
       });
     }).catch(function () { renderSyncUI(); });
+  }
+
+  // ---- 공동 사용 (구글 드라이브 공유 파일 기반 실시간 협업) ----
+  var GOOGLE_CLIENT_ID = '611607172762-flglcddal5eio9ghh4n8odjtbsmok2pe.apps.googleusercontent.com';
+  var DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
+  var SHARE_STORAGE_KEY = 'session-todo-share-config-v1';
+  var shareConfig = null; // { fileId, fileName }
+  var shareToken = null; // { access_token, expires_at }
+  var shareTokenClient = null;
+  var shareGsiLoaded = false;
+  var sharePollTimer = null;
+  var shareWriteTimer = null;
+  var lastSharedText = null;
+  var sharePanelOpen = false;
+  var shareBusy = false;
+
+  function loadShareConfig() {
+    try {
+      var raw = localStorage.getItem(SHARE_STORAGE_KEY);
+      if (raw) shareConfig = JSON.parse(raw);
+    } catch (e) { shareConfig = null; }
+  }
+
+  function saveShareConfig() {
+    if (shareConfig) {
+      localStorage.setItem(SHARE_STORAGE_KEY, JSON.stringify(shareConfig));
+    } else {
+      localStorage.removeItem(SHARE_STORAGE_KEY);
+    }
+  }
+
+  function extractDriveFileId(input) {
+    if (!input) return '';
+    var s = input.trim();
+    var m = s.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+    if (m) return m[1];
+    m = s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+    if (m) return m[1];
+    if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) return s;
+    return '';
+  }
+
+  function ensureGoogleScript() {
+    if (shareGsiLoaded && window.google && window.google.accounts) {
+      return Promise.resolve();
+    }
+    return new Promise(function (resolve, reject) {
+      var existing = document.getElementById('gsiScript');
+      if (existing && window.google && window.google.accounts) {
+        shareGsiLoaded = true;
+        resolve();
+        return;
+      }
+      var script = existing || document.createElement('script');
+      script.id = 'gsiScript';
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      script.onload = function () { shareGsiLoaded = true; resolve(); };
+      script.onerror = function () { reject(new Error('Google 스크립트를 불러오지 못했습니다.')); };
+      if (!existing) document.head.appendChild(script);
+    });
+  }
+
+  function ensureShareToken() {
+    if (shareToken && shareToken.access_token && shareToken.expires_at > Date.now() + 30000) {
+      return Promise.resolve(shareToken.access_token);
+    }
+    return ensureGoogleScript().then(function () {
+      return new Promise(function (resolve, reject) {
+        try {
+          if (!shareTokenClient) {
+            shareTokenClient = google.accounts.oauth2.initTokenClient({
+              client_id: GOOGLE_CLIENT_ID,
+              scope: DRIVE_SCOPE,
+              callback: function () {}
+            });
+          }
+          shareTokenClient.callback = function (resp) {
+            if (resp && resp.access_token) {
+              shareToken = {
+                access_token: resp.access_token,
+                expires_at: Date.now() + ((resp.expires_in || 3600) * 1000)
+              };
+              resolve(resp.access_token);
+            } else {
+              reject(new Error('Google 로그인에 실패했습니다.'));
+            }
+          };
+          shareTokenClient.error_callback = function (err) {
+            reject(new Error((err && err.message) || 'Google 로그인이 취소되었습니다.'));
+          };
+          shareTokenClient.requestAccessToken({ prompt: shareToken ? '' : 'consent' });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+  }
+
+  function shareLogin() {
+    setShareStatus('connecting', '구글 계정으로 로그인 중...');
+    ensureShareToken().then(function () {
+      setShareStatus(shareConfig ? 'connected' : 'logged-in', shareConfig ? shareConfig.fileName : '');
+      if (shareConfig && shareConfig.fileId) {
+        connectShareFile(shareConfig.fileId, shareConfig.fileName, true);
+      } else {
+        updateShareUI();
+      }
+    }).catch(function (err) {
+      setShareStatus('error', err.message || String(err));
+    });
+  }
+
+  function shareLogout() {
+    if (shareToken && shareToken.access_token && window.google && google.accounts && google.accounts.oauth2) {
+      try { google.accounts.oauth2.revoke(shareToken.access_token, function () {}); } catch (e) {}
+    }
+    shareToken = null;
+    stopSharePolling();
+    setShareStatus('idle', '');
+    updateShareUI();
+  }
+
+  function driveApi(path, options) {
+    options = options || {};
+    return ensureShareToken().then(function (token) {
+      var headers = options.headers || {};
+      headers['Authorization'] = 'Bearer ' + token;
+      return fetch('https://www.googleapis.com' + path, {
+        method: options.method || 'GET',
+        headers: headers,
+        body: options.body
+      }).then(function (res) {
+        if (!res.ok) {
+          return res.text().then(function (t) {
+            throw new Error('Drive API 오류 (' + res.status + '): ' + t.slice(0, 200));
+          });
+        }
+        return res;
+      });
+    });
+  }
+
+  function fetchShareFileMeta(fileId) {
+    return driveApi('/drive/v3/files/' + fileId + '?fields=id,name,modifiedTime,mimeType').then(function (res) {
+      return res.json();
+    });
+  }
+
+  function fetchShareFileContent(fileId) {
+    return driveApi('/drive/v3/files/' + fileId + '?alt=media').then(function (res) {
+      return res.text();
+    });
+  }
+
+  function writeShareFileContent(fileId, text) {
+    return driveApi('/upload/drive/v3/files/' + fileId + '?uploadType=media', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: text
+    }).then(function (res) { return res.json(); });
+  }
+
+  function createShareFile(name, text) {
+    return driveApi('/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'multipart/related; boundary=shareboundary123' },
+      body: '--shareboundary123\r\n' +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify({ name: name, mimeType: 'application/json' }) + '\r\n' +
+        '--shareboundary123\r\n' +
+        'Content-Type: application/json\r\n\r\n' +
+        text + '\r\n' +
+        '--shareboundary123--'
+    }).then(function (res) { return res.json(); });
+  }
+
+  function setShareStatus(kind, detail) {
+    var el = document.getElementById('shareStatus');
+    if (!el) return;
+    var label;
+    switch (kind) {
+      case 'connected': label = '🟢 공유 파일에 연결됨: ' + (detail || ''); break;
+      case 'logged-in': label = '🔵 로그인됨 (공유 파일을 선택하세요)'; break;
+      case 'connecting': label = '⏳ ' + (detail || '연결 중...'); break;
+      case 'syncing': label = '🔄 ' + (detail || '동기화 중...'); break;
+      case 'error': label = '🔴 오류: ' + (detail || ''); break;
+      case 'denied': label = '🔴 권한이 거부되었습니다'; break;
+      default: label = '⚪ 로그인하지 않았습니다';
+    }
+    el.textContent = label;
+  }
+
+  function updateShareUI() {
+    var loginBtn = document.getElementById('shareLoginBtn');
+    var logoutBtn = document.getElementById('shareLogoutBtn');
+    var connectRow = document.getElementById('shareConnectRow');
+    var disconnectBtn = document.getElementById('shareDisconnectBtn');
+    var fileInfo = document.getElementById('shareFileInfo');
+    var loggedIn = !!shareToken;
+    if (loginBtn) loginBtn.style.display = loggedIn ? 'none' : '';
+    if (logoutBtn) logoutBtn.style.display = loggedIn ? '' : 'none';
+    if (connectRow) connectRow.style.display = (loggedIn && !shareConfig) ? '' : 'none';
+    if (disconnectBtn) disconnectBtn.style.display = (loggedIn && shareConfig) ? '' : 'none';
+    if (fileInfo) {
+      fileInfo.style.display = shareConfig ? '' : 'none';
+      fileInfo.textContent = shareConfig ? ('연결된 파일: ' + shareConfig.fileName) : '';
+    }
+    if (!loggedIn) {
+      setShareStatus('idle', '');
+    } else if (shareConfig) {
+      setShareStatus('connected', shareConfig.fileName);
+    } else {
+      setShareStatus('logged-in', '');
+    }
+  }
+
+  function stopSharePolling() {
+    if (sharePollTimer) { clearInterval(sharePollTimer); sharePollTimer = null; }
+  }
+
+  function startSharePolling() {
+    stopSharePolling();
+    sharePollTimer = setInterval(pollShareFile, 5000);
+  }
+
+  function pollShareFile() {
+    if (!shareConfig || !shareToken || shareBusy) return;
+    fetchShareFileContent(shareConfig.fileId).then(function (text) {
+      if (text === lastSharedText) return;
+      lastSharedText = text;
+      if (text && text.trim()) {
+        try {
+          var parsed = JSON.parse(text);
+          if (parsed && Array.isArray(parsed.sessions)) {
+            state = normalizeLoadedState(parsed);
+            save();
+            renderAll();
+          }
+        } catch (e) {}
+      }
+    }).catch(function (err) {
+      setShareStatus('error', err.message || String(err));
+    });
+  }
+
+  function writeShareFile() {
+    if (!shareConfig || !shareToken) return;
+    var text = JSON.stringify(state);
+    if (text === lastSharedText) return;
+    shareBusy = true;
+    setShareStatus('syncing', '저장 중...');
+    writeShareFileContent(shareConfig.fileId, text).then(function () {
+      lastSharedText = text;
+      setShareStatus('connected', shareConfig.fileName);
+      shareBusy = false;
+    }).catch(function (err) {
+      setShareStatus('error', err.message || String(err));
+      shareBusy = false;
+    });
+  }
+
+  function scheduleShareWrite() {
+    if (!shareConfig || !shareToken) return;
+    if (shareWriteTimer) clearTimeout(shareWriteTimer);
+    shareWriteTimer = setTimeout(writeShareFile, 1200);
+  }
+
+  function connectShareFile(fileId, knownName, skipLoad) {
+    setShareStatus('connecting', '공유 파일 정보를 확인하는 중...');
+    fetchShareFileMeta(fileId).then(function (meta) {
+      shareConfig = { fileId: meta.id, fileName: meta.name || knownName || '공유 할 일 목록' };
+      saveShareConfig();
+      updateShareUI();
+      if (skipLoad) {
+        startSharePolling();
+        return null;
+      }
+      return fetchShareFileContent(fileId).then(function (text) {
+        lastSharedText = text;
+        if (text && text.trim()) {
+          try {
+            var parsed = JSON.parse(text);
+            if (parsed && Array.isArray(parsed.sessions)) {
+              state = normalizeLoadedState(parsed);
+              save();
+              renderAll();
+            }
+          } catch (e) {}
+        } else {
+          return writeShareFileContent(fileId, JSON.stringify(state)).then(function () {
+            lastSharedText = JSON.stringify(state);
+          });
+        }
+      }).then(function () {
+        startSharePolling();
+      });
+    }).catch(function (err) {
+      setShareStatus('error', err.message || String(err));
+    });
+  }
+
+  function disconnectShareFile() {
+    stopSharePolling();
+    shareConfig = null;
+    lastSharedText = null;
+    saveShareConfig();
+    updateShareUI();
+  }
+
+  function shareCreateNew() {
+    var name = window.prompt('새 공유 할 일 목록의 이름을 입력하세요', '공유 할 일 목록');
+    if (!name) return;
+    setShareStatus('connecting', '새 공유 파일을 만드는 중...');
+    var text = JSON.stringify(state);
+    createShareFile(name, text).then(function (file) {
+      shareConfig = { fileId: file.id, fileName: file.name || name };
+      lastSharedText = text;
+      saveShareConfig();
+      updateShareUI();
+      startSharePolling();
+      window.alert('새 공유 파일이 만들어졌습니다.\n구글 드라이브에서 이 파일을 열어 "공유" 버튼으로 함께 사용할 사람을 초대하세요.\n(파일 이름: ' + (file.name || name) + ')');
+    }).catch(function (err) {
+      setShareStatus('error', err.message || String(err));
+    });
+  }
+
+  function toggleSharePanel() {
+    sharePanelOpen = !sharePanelOpen;
+    var panel = document.getElementById('sharePanel');
+    if (panel) panel.style.display = sharePanelOpen ? '' : 'none';
   }
 
   function getSession(sessionId) {
@@ -1011,9 +1374,29 @@
   document.getElementById('addSessionBtn').addEventListener('click', addSession);
   document.getElementById('syncConnectBtn').addEventListener('click', connectSyncFile);
 
+  document.getElementById('shareToggleBtn').addEventListener('click', toggleSharePanel);
+  document.getElementById('shareLoginBtn').addEventListener('click', shareLogin);
+  document.getElementById('shareLogoutBtn').addEventListener('click', shareLogout);
+  document.getElementById('shareCreateBtn').addEventListener('click', shareCreateNew);
+  document.getElementById('shareDisconnectBtn').addEventListener('click', disconnectShareFile);
+  document.getElementById('shareConnectBtn').addEventListener('click', function () {
+    var input = document.getElementById('shareFileIdInput');
+    var fileId = extractDriveFileId(input.value);
+    if (!fileId) {
+      window.alert('올바른 공유 파일 ID 또는 드라이브 링크를 입력해주세요.');
+      return;
+    }
+    connectShareFile(fileId);
+  });
+
   renderAll();
   renderSyncUI();
   restoreSyncConnection();
+  loadShareConfig();
+  updateShareUI();
+  if (shareConfig) {
+    setShareStatus('connecting', '로그인이 필요합니다');
+  }
 })();
 </script>
 
