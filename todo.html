@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>세션별 투두리스트 </title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+    background: #f4f5f7;
+    color: #2b2d31;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header {
+    background: #ffffff;
+    border-bottom: 1px solid #e2e4e8;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  h1 { font-size: 18px; font-weight: 600; }
+  .add-session-btn {
+    border: none;
+    background: #3b6ef0;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 9px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .add-session-btn:hover { background: #2f5bd0; }
+  .sync-bar { display: flex; align-items: center; gap: 10px; margin: 0 14px; }
+  .sync-status { font-size: 11px; color: #9aa0a6; }
+  .sync-btn {
+    border: 1px solid #d8dadf; background: #fff; color: #2b2d31;
+    font-size: 12px; font-weight: 600; padding: 7px 12px; border-radius: 8px; cursor: pointer; flex-shrink: 0;
+  }
+  .sync-btn:hover { background: #f0f1f3; }
+
+  .app-layout { flex: 1; display: flex; min-height: 0; }
+  .board-wrap { flex: 1; overflow: auto; padding: 20px; min-width: 0; }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+
+  .calendar-panel {
+    width: 360px;
+    flex-shrink: 0;
+    border-left: 1px solid #e2e4e8;
+    background: #ffffff;
+    overflow-y: auto;
+    padding: 16px;
+  }
+  .cal-agenda {
+    border: 1px solid #e6e8eb;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 16px;
+    background: #fafbfc;
+  }
+  .cal-agenda-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .cal-agenda-empty { font-size: 12px; color: #aeb1b6; }
+  .cal-agenda-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .cal-agenda-item { display: flex; align-items: flex-start; gap: 8px; }
+  .cal-agenda-dot { width: 9px; height: 9px; border-radius: 3px; margin-top: 4px; flex-shrink: 0; }
+  .cal-agenda-meta { min-width: 0; }
+  .cal-agenda-when { font-size: 10px; color: #3b6ef0; font-weight: 600; }
+  .cal-agenda-text { font-size: 12px; color: #2b2d31; word-break: break-word; }
+  .cal-agenda-session { font-size: 10px; color: #aeb1b6; margin-top: 1px; }
+  .cal-agenda-item.done .cal-agenda-when { color: #aeb1b6; }
+  .cal-agenda-item.done .cal-agenda-text { color: #aeb1b6; text-decoration: line-through; }
+  .cal-legend {
+    font-size: 11px;
+    color: #9aa0a6;
+    margin-bottom: 14px;
+    line-height: 1.6;
+  }
+  .cal-legend-row { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  .cal-legend-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex-shrink: 0; }
+  .cal-month { margin-bottom: 22px; }
+  .cal-month-title { font-weight: 700; font-size: 14px; margin-bottom: 8px; text-align: center; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cal-dow { font-size: 10px; color: #9aa0a6; text-align: center; padding: 2px 0 4px 0; }
+  .cal-day {
+    min-height: 58px;
+    border: 1px solid #ebedf0;
+    border-radius: 6px;
+    padding: 3px;
+    font-size: 10px;
+    background: #fff;
+  }
+  .cal-day.other-month { opacity: 0.32; }
+  .cal-day.today { border-color: #3b6ef0; border-width: 2px; }
+  .cal-day-num { font-weight: 600; font-size: 11px; margin-bottom: 3px; color: #2b2d31; }
+  .cal-bar { height: 4px; border-radius: 2px; margin-bottom: 2px; background: transparent; }
+  .cal-more { font-size: 9px; color: #9aa0a6; margin-top: 1px; }
+
+  main { flex: 1; }
+
+  .session-card-wrap { display: contents; }
+  .card {
+    background: #ffffff;
+    border: 1px solid #e6e8eb;
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    min-height: 220px;
+  }
+  .card-header { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+  .card-title {
+    font-size: 16px;
+    font-weight: 700;
+    flex: 1;
+    cursor: text;
+    padding: 4px 6px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    word-break: break-all;
+  }
+  .card-title:hover { background: #f0f1f3; border-color: #e2e4e8; }
+  .card-title-input {
+    flex: 1;
+    font-size: 16px;
+    font-weight: 700;
+    border: 1px solid #3b6ef0;
+    border-radius: 6px;
+    padding: 4px 6px;
+    color: #2b2d31;
+    font-family: inherit;
+  }
+  .icon-btn {
+    border: none; background: none; cursor: pointer; color: #c2c5cb;
+    font-size: 14px; padding: 4px 6px; border-radius: 6px; flex-shrink: 0;
+  }
+  .icon-btn:hover { background: #fbe9e9; color: #d23f3f; }
+  .add-row { display: flex; gap: 6px; margin-bottom: 12px; }
+  .add-row input[type="text"] {
+    flex: 1; padding: 9px 11px; border: 1px solid #d8dadf; border-radius: 8px;
+    font-size: 13px; background: #fff; min-width: 0;
+  }
+  .add-row input[type="text"]:focus { outline: none; border-color: #3b6ef0; }
+  .add-row button {
+    padding: 0 14px; border: none; border-radius: 8px; background: #2b2d31;
+    color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0;
+  }
+  .add-row button:hover { background: #45474c; }
+  ul.list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  li.item {
+    display: flex; align-items: flex-start; gap: 8px; background: #fafbfc;
+    border: 1px solid #ebedf0; border-radius: 8px; padding: 8px 10px;
+  }
+  li.item.dragging { opacity: 0.4; }
+  li.item.drag-over { border-color: #3b6ef0; }
+  .handle {
+    cursor: grab; color: #c8cbd1; font-size: 14px; line-height: 1; padding: 2px;
+    user-select: none; touch-action: none; flex-shrink: 0; margin-top: 2px;
+  }
+  .handle:active { cursor: grabbing; }
+  input.chk { width: 17px; height: 17px; flex-shrink: 0; cursor: pointer; accent-color: #3b6ef0; margin-top: 1px; }
+  .item-body { flex: 1; min-width: 0; }
+  .item-text { font-size: 13px; word-break: break-word; white-space: pre-wrap; }
+  .item-edit-input {
+    width: 100%; font-size: 13px; font-family: inherit; padding: 6px 8px;
+    border: 1px solid #3b6ef0; border-radius: 6px;
+  }
+  .item-schedule-badge {
+    display: inline-block; margin-top: 4px; font-size: 11px; color: #3b6ef0;
+    background: #eaf0fe; border-radius: 5px; padding: 2px 6px;
+  }
+  li.item.done .item-text { color: #aeb1b6; text-decoration: line-through; }
+  li.item.done .item-schedule-badge { color: #aeb1b6; background: #f0f1f3; }
+  .edit-btn:hover { background: #e8eefd; color: #3b6ef0; }
+  .del-btn {
+    border: none; background: none; color: #c2c5cb; cursor: pointer;
+    font-size: 14px; padding: 2px 6px; border-radius: 6px; flex-shrink: 0;
+  }
+  .del-btn:hover { background: #fbe9e9; color: #d23f3f; }
+  .empty-msg { text-align: center; color: #c2c5cb; font-size: 12px; margin-top: 16px; }
+  footer { text-align: center; font-size: 11px; color: #aeb1b6; padding: 8px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📝 세션별 투두리스트</h1>
+  <div class="sync-bar">
+    <span class="sync-status" id="syncStatus">⚪ 동기화 파일이 연결되지 않았습니다 (이 기기에만 저장됨)</span>
+    <button class="sync-btn" id="syncConnectBtn">🔗 동기화 파일 연결</button>
+  </div>
+  <button class="add-session-btn" id="addSessionBtn">+ 새 세션 추가</button>
+</header>
+
+<div class="app-layout">
+  <main class="board-wrap">
+    <div class="board" id="board"></div>
+  </main>
+  <aside class="calendar-panel" id="calendarPanel"></aside>
+</div>
+
+<footer>모든 내용은 이 브라우저(이 컴퓨터)에 자동 저장되며, 창을 닫아도 그대로 유지됩니다. · 할 일에 'YYYY.MM.DD. HH:MM' 또는 'YYYY.MM.DD. HH:MM ~ YYYY.MM.DD. HH:MM' 형식으로 날짜를 적으면 오른쪽 달력에 자동으로 표시됩니다.</footer>
+
+<script>
+(function () {
+  var STORAGE_KEY = 'session-todo-app-v1';
+  var DEFAULT_SESSION_COUNT = 5;
+  var DAY_MS = 86400000;
+  var RAINBOW = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db', '#2c3e8f', '#9b59b6'];
+  var GRAY = '#b0b3b8';
+  var DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  var SCHEDULE_RE = /(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{1,2}):(\d{2})(?:\s*~\s*(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{1,2}):(\d{2}))?/;
+
+  function sid() { return 's_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8); }
+  function uid() { return 'i_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8); }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  // ---- Schedule parsing ----
+  function parseSchedule(text) {
+    var m = text.match(SCHEDULE_RE);
+    if (!m) return null;
+    var start = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+    if (isNaN(start.getTime())) return null;
+    var result = { start: start.getTime(), end: null };
+    if (m[6]) {
+      var end = new Date(+m[6], +m[7] - 1, +m[8], +m[9], +m[10]);
+      if (!isNaN(end.getTime()) && end.getTime() >= start.getTime()) {
+        result.end = end.getTime();
+      }
+    }
+    return result;
+  }
+
+  function formatScheduleBadge(schedule) {
+    function fmt(ms) {
+      var d = new Date(ms);
+      return d.getFullYear() + '.' + pad2(d.getMonth() + 1) + '.' + pad2(d.getDate()) + '. ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    }
+    if (schedule.end != null) return '🗓 ' + fmt(schedule.start) + ' ~ ' + fmt(schedule.end);
+    return '🗓 ' + fmt(schedule.start);
+  }
+
+  function dayIndexFromTime(ms) {
+    var d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return Math.round(d.getTime() / DAY_MS);
+  }
+  function dayIndexFromDate(date) {
+    var d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    return Math.round(d.getTime() / DAY_MS);
+  }
+
+  // ---- State ----
+  function defaultSessions() {
+    var sessions = [];
+    for (var i = 0; i < DEFAULT_SESSION_COUNT; i++) {
+      sessions.push({ id: sid(), name: '세션 ' + (i + 1), items: [] });
+    }
+    return sessions;
+  }
+
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
+          parsed.sessions.forEach(function (s) {
+            if (!s.id) s.id = sid();
+            s.items.forEach(function (it) {
+              if (it.schedule === undefined) it.schedule = parseSchedule(it.text);
+            });
+          });
+          return { sessions: parsed.sessions };
+        }
+      }
+    } catch (e) {}
+    return { sessions: defaultSessions() };
+  }
+
+  var state = loadState();
+  var dragSrcId = null;
+  var dragSessionId = null;
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    scheduleSyncWrite();
+  }
+
+  // ---- 외부 동기화 (구글 드라이브 동기화 폴더의 JSON 파일과 연동) ----
+  // File System Access API를 사용해 사용자가 지정한 파일(예: 구글 드라이브 동기화 폴더 안의
+  // todo-sync-data.json)에 상태를 저장/불러오기 합니다. 그 파일을 구글 드라이브가
+  // 자동으로 다른 기기와 동기화해주므로, 여러 기기에서 같은 데이터를 사용할 수 있습니다.
+  var SYNC_DB_NAME = 'session-todo-sync-db';
+  var SYNC_STORE = 'handles';
+  var SYNC_KEY = 'syncFileHandle';
+  var syncSupported = !!(window.showSaveFilePicker && window.indexedDB);
+  var syncHandle = null;
+  var syncStatus = 'disconnected'; // 'disconnected' | 'connected' | 'denied'
+  var syncFileName = '';
+  var lastSyncedText = null;
+  var syncPollTimer = null;
+  var syncWriteTimer = null;
+
+  function openSyncDB() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(SYNC_DB_NAME, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(SYNC_STORE); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  function idbGet(key) {
+    return openSyncDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(SYNC_STORE, 'readonly');
+        var req = tx.objectStore(SYNC_STORE).get(key);
+        req.onsuccess = function () { resolve(req.result || null); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+  function idbSet(key, value) {
+    return openSyncDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(SYNC_STORE, 'readwrite');
+        tx.objectStore(SYNC_STORE).put(value, key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+  function idbDel(key) {
+    return openSyncDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(SYNC_STORE, 'readwrite');
+        tx.objectStore(SYNC_STORE).delete(key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function setSyncStatus(status, fileName) {
+    syncStatus = status;
+    if (fileName !== undefined) syncFileName = fileName;
+    renderSyncUI();
+  }
+
+  function renderSyncUI() {
+    var el = document.getElementById('syncStatus');
+    var btn = document.getElementById('syncConnectBtn');
+    if (!el || !btn) return;
+    if (!syncSupported) {
+      el.textContent = '⚪ 이 브라우저는 파일 동기화를 지원하지 않습니다 (Chrome/Edge 권장)';
+      btn.style.display = 'none';
+      return;
+    }
+    btn.style.display = '';
+    if (syncStatus === 'connected') {
+      el.textContent = '✅ 동기화 연결됨: ' + syncFileName + ' (다른 기기와 자동 동기화)';
+      btn.textContent = '연결 끊기';
+    } else if (syncStatus === 'denied') {
+      el.textContent = '⚠ "' + syncFileName + '" 파일 접근 권한이 필요합니다. 버튼을 눌러 다시 연결해주세요.';
+      btn.textContent = '🔗 동기화 파일 다시 연결';
+    } else {
+      el.textContent = '⚪ 동기화 파일이 연결되지 않았습니다 (이 기기에만 저장됨)';
+      btn.textContent = '🔗 동기화 파일 연결';
+    }
+  }
+
+  function stopSyncPolling() { if (syncPollTimer) { clearInterval(syncPollTimer); syncPollTimer = null; } }
+  function startSyncPolling() { stopSyncPolling(); syncPollTimer = setInterval(pollSyncFile, 15000); }
+
+  function readFileAsText(handle) { return handle.getFile().then(function (file) { return file.text(); }); }
+
+  function normalizeLoadedState(parsed) {
+    parsed.sessions.forEach(function (s) {
+      if (!s.id) s.id = sid();
+      (s.items || []).forEach(function (it) {
+        if (it.schedule === undefined) it.schedule = parseSchedule(it.text);
+        if (!it.id) it.id = uid();
+      });
+    });
+    return parsed;
+  }
+
+  function pollSyncFile() {
+    if (!syncHandle || syncStatus !== 'connected') return;
+    syncHandle.queryPermission({ mode: 'readwrite' }).then(function (perm) {
+      if (perm !== 'granted') { setSyncStatus('denied'); return; }
+      readFileAsText(syncHandle).then(function (text) {
+        if (text && text !== lastSyncedText) {
+          try {
+            var parsed = JSON.parse(text);
+            if (parsed && Array.isArray(parsed.sessions)) {
+              state = normalizeLoadedState(parsed);
+              lastSyncedText = text;
+              localStorage.setItem(STORAGE_KEY, text);
+              renderAll();
+            }
+          } catch (e) { /* 잘못된 형식이면 무시 */ }
+        }
+      });
+    }).catch(function () {});
+  }
+
+  function writeSyncFile() {
+    if (!syncHandle || syncStatus !== 'connected') return;
+    var text = JSON.stringify(state);
+    if (text === lastSyncedText) return;
+    syncHandle.queryPermission({ mode: 'readwrite' }).then(function (perm) {
+      if (perm !== 'granted') { setSyncStatus('denied'); return; }
+      return syncHandle.createWritable().then(function (writable) {
+        return writable.write(text).then(function () { return writable.close(); });
+      }).then(function () { lastSyncedText = text; });
+    }).catch(function () { /* 일시적 쓰기 오류는 무시, 다음 저장 때 재시도 */ });
+  }
+
+  function scheduleSyncWrite() {
+    if (syncWriteTimer) clearTimeout(syncWriteTimer);
+    syncWriteTimer = setTimeout(writeSyncFile, 600);
+  }
+
+  function connectSyncFile() {
+    if (!syncSupported) {
+      alert('이 브라우저는 파일 동기화 기능을 지원하지 않습니다. Chrome 또는 Edge 브라우저에서 열어주세요.');
+      return;
+    }
+    if (syncStatus === 'connected' || syncStatus === 'denied') {
+      var ok = confirm('동기화 연결을 끊을까요?\n(파일 자체는 삭제되지 않고, 이 기기에서만 연결이 해제됩니다)');
+      if (!ok) return;
+      stopSyncPolling();
+      syncHandle = null;
+      lastSyncedText = null;
+      idbDel(SYNC_KEY);
+      setSyncStatus('disconnected', '');
+      return;
+    }
+    window.showSaveFilePicker({
+      suggestedName: 'todo-sync-data.json',
+      types: [{ description: 'JSON 데이터 파일', accept: { 'application/json': ['.json'] } }]
+    }).then(function (handle) {
+      syncHandle = handle;
+      return idbSet(SYNC_KEY, handle).then(function () { return readFileAsText(handle); });
+    }).then(function (text) {
+      if (text && text.trim()) {
+        try {
+          var parsed = JSON.parse(text);
+          if (parsed && Array.isArray(parsed.sessions) && parsed.sessions.length) {
+            var loadIt = confirm(
+              '선택한 파일에 이미 데이터가 들어 있습니다.\n\n' +
+              '[확인] = 파일에 있는 데이터를 불러와서 사용\n' +
+              '[취소] = 지금 화면의 데이터로 파일을 덮어쓰기'
+            );
+            if (loadIt) {
+              state = normalizeLoadedState(parsed);
+              save();
+              renderAll();
+            }
+          }
+        } catch (e) { /* 빈 파일/잘못된 형식 -> 아래에서 현재 상태로 채움 */ }
+      }
+      lastSyncedText = null;
+      setSyncStatus('connected', syncHandle.name);
+      writeSyncFile();
+      startSyncPolling();
+    }).catch(function (err) {
+      if (err && err.name === 'AbortError') return;
+      alert('파일 연결에 실패했습니다: ' + (err && err.message ? err.message : err));
+    });
+  }
+
+  function restoreSyncConnection() {
+    if (!syncSupported) { renderSyncUI(); return; }
+    idbGet(SYNC_KEY).then(function (handle) {
+      if (!handle) { renderSyncUI(); return; }
+      syncHandle = handle;
+      return handle.queryPermission({ mode: 'readwrite' }).then(function (perm) {
+        if (perm === 'granted') {
+          setSyncStatus('connected', handle.name);
+          return readFileAsText(handle).then(function (text) {
+            lastSyncedText = text;
+            if (text && text.trim()) {
+              try {
+                var parsed = JSON.parse(text);
+                if (parsed && Array.isArray(parsed.sessions)) {
+                  state = normalizeLoadedState(parsed);
+                  save();
+                  renderAll();
+                }
+              } catch (e) {}
+            }
+            startSyncPolling();
+          });
+        } else {
+          setSyncStatus('denied', handle.name);
+        }
+      });
+    }).catch(function () { renderSyncUI(); });
+  }
+
+  function getSession(sessionId) {
+    return state.sessions.find(function (s) { return s.id === sessionId; });
+  }
+
+  function renderAll() {
+    renderBoard();
+    renderCalendar();
+  }
+
+  // ---- Board rendering ----
+  function renderBoard() {
+    var board = document.getElementById('board');
+    board.innerHTML = '';
+    state.sessions.forEach(function (session) {
+      board.appendChild(renderCard(session));
+    });
+  }
+
+  function renderCard(session) {
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.sessionId = session.id;
+
+    var headerRow = document.createElement('div');
+    headerRow.className = 'card-header';
+
+    var title = document.createElement('div');
+    title.className = 'card-title';
+    title.textContent = session.name;
+    title.title = '클릭하여 이름 수정';
+    title.addEventListener('click', function () { startEditTitle(session, title, headerRow); });
+
+    var delSessionBtn = document.createElement('button');
+    delSessionBtn.className = 'icon-btn';
+    delSessionBtn.title = '세션 삭제';
+    delSessionBtn.textContent = '✕';
+    delSessionBtn.addEventListener('click', function () { deleteSession(session.id); });
+
+    headerRow.appendChild(title);
+    headerRow.appendChild(delSessionBtn);
+    card.appendChild(headerRow);
+
+    var addRow = document.createElement('div');
+    addRow.className = 'add-row';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = '할 일 입력 (예: 2026.06.10. 14:00 회의)';
+    var addBtn = document.createElement('button');
+    addBtn.textContent = '추가';
+    var doAdd = function () {
+      addItem(session.id, input.value);
+      input.value = '';
+      input.focus();
+    };
+    addBtn.addEventListener('click', doAdd);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+    });
+    addRow.appendChild(input);
+    addRow.appendChild(addBtn);
+    card.appendChild(addRow);
+
+    var list = document.createElement('ul');
+    list.className = 'list';
+    if (session.items.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'empty-msg';
+      empty.textContent = '아직 등록된 항목이 없습니다.';
+      card.appendChild(list);
+      card.appendChild(empty);
+    } else {
+      session.items.forEach(function (item) { list.appendChild(renderItem(session, item)); });
+      card.appendChild(list);
+    }
+
+    return card;
+  }
+
+  function startEditTitle(session, titleEl, headerRow) {
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'card-title-input';
+    input.value = session.name;
+    headerRow.replaceChild(input, titleEl);
+    input.focus();
+    input.select();
+
+    var finish = function (commit) {
+      if (commit) {
+        var trimmed = input.value.trim();
+        if (trimmed) session.name = trimmed;
+        save();
+      }
+      renderBoard();
+    };
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', function () { finish(true); });
+  }
+
+  function renderItem(session, item) {
+    var li = document.createElement('li');
+    li.className = 'item' + (item.done ? ' done' : '');
+    li.draggable = true;
+    li.dataset.id = item.id;
+
+    var handle = document.createElement('span');
+    handle.className = 'handle';
+    handle.title = '드래그하여 순서 변경';
+    handle.textContent = '⋮⋮';
+
+    var chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.className = 'chk';
+    chk.checked = !!item.done;
+    chk.addEventListener('change', function () { toggleDone(session.id, item.id); });
+
+    var body = document.createElement('div');
+    body.className = 'item-body';
+
+    var text = document.createElement('div');
+    text.className = 'item-text';
+    text.textContent = item.text;
+    text.title = '클릭하여 내용 수정';
+    text.addEventListener('click', function () { startEditItemText(session, item, body); });
+    body.appendChild(text);
+
+    if (item.schedule) {
+      var badge = document.createElement('div');
+      badge.className = 'item-schedule-badge';
+      badge.textContent = formatScheduleBadge(item.schedule);
+      body.appendChild(badge);
+    }
+
+    var del = document.createElement('button');
+    del.className = 'del-btn';
+    del.title = '삭제';
+    del.textContent = '✕';
+    del.addEventListener('click', function () { deleteItem(session.id, item.id); });
+
+    li.appendChild(handle);
+    li.appendChild(chk);
+    li.appendChild(body);
+    li.appendChild(del);
+
+    li.addEventListener('dragstart', function (e) {
+      dragSrcId = item.id;
+      dragSessionId = session.id;
+      li.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', item.id); } catch (err) {}
+    });
+    li.addEventListener('dragend', function () {
+      li.classList.remove('dragging');
+      var overEls = document.querySelectorAll('li.item.drag-over');
+      for (var i = 0; i < overEls.length; i++) overEls[i].classList.remove('drag-over');
+      dragSrcId = null;
+      dragSessionId = null;
+    });
+    li.addEventListener('dragover', function (e) {
+      if (dragSessionId !== session.id) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      li.classList.add('drag-over');
+    });
+    li.addEventListener('dragleave', function () { li.classList.remove('drag-over'); });
+    li.addEventListener('drop', function (e) {
+      if (dragSessionId !== session.id) return;
+      e.preventDefault();
+      li.classList.remove('drag-over');
+      var targetId = item.id;
+      if (dragSrcId && dragSrcId !== targetId) {
+        reorder(session.id, dragSrcId, targetId);
+      }
+    });
+
+    return li;
+  }
+
+  function startEditItemText(session, item, bodyEl) {
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'item-edit-input';
+    input.value = item.text;
+    bodyEl.innerHTML = '';
+    bodyEl.appendChild(input);
+    input.focus();
+    input.select();
+
+    var finish = function (commit) {
+      if (commit) {
+        var trimmed = input.value.trim();
+        if (trimmed) {
+          item.text = trimmed;
+          item.schedule = parseSchedule(trimmed);
+          save();
+        }
+      }
+      renderAll();
+    };
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', function () { finish(true); });
+  }
+
+  // ---- Actions ----
+  function addItem(sessionId, text) {
+    var trimmed = text.trim();
+    if (!trimmed) return;
+    var session = getSession(sessionId);
+    session.items.unshift({ id: uid(), text: trimmed, done: false, schedule: parseSchedule(trimmed) });
+    save();
+    renderAll();
+  }
+
+  function toggleDone(sessionId, itemId) {
+    var session = getSession(sessionId);
+    var idx = session.items.findIndex(function (it) { return it.id === itemId; });
+    if (idx === -1) return;
+    var item = session.items[idx];
+    item.done = !item.done;
+    session.items.splice(idx, 1);
+    if (item.done) { session.items.push(item); }
+    else { session.items.unshift(item); }
+    save();
+    renderAll();
+  }
+
+  function deleteItem(sessionId, itemId) {
+    var session = getSession(sessionId);
+    session.items = session.items.filter(function (it) { return it.id !== itemId; });
+    save();
+    renderAll();
+  }
+
+  function reorder(sessionId, srcId, targetId) {
+    var session = getSession(sessionId);
+    var items = session.items;
+    var srcIdx = items.findIndex(function (it) { return it.id === srcId; });
+    var targetIdx = items.findIndex(function (it) { return it.id === targetId; });
+    if (srcIdx === -1 || targetIdx === -1) return;
+    var moved = items.splice(srcIdx, 1)[0];
+    items.splice(targetIdx, 0, moved);
+    save();
+    renderAll();
+  }
+
+  function addSession() {
+    var name = '세션 ' + (state.sessions.length + 1);
+    state.sessions.push({ id: sid(), name: name, items: [] });
+    save();
+    renderAll();
+  }
+
+  function deleteSession(sessionId) {
+    if (state.sessions.length <= 1) {
+      alert('최소 1개의 세션은 남아 있어야 합니다.');
+      return;
+    }
+    var session = getSession(sessionId);
+    var ok = confirm('"' + session.name + '" 세션과 그 안의 모든 항목을 삭제할까요?');
+    if (!ok) return;
+    state.sessions = state.sessions.filter(function (s) { return s.id !== sessionId; });
+    save();
+    renderAll();
+  }
+
+  // ---- Calendar ----
+  function collectEvents() {
+    var events = [];
+    state.sessions.forEach(function (session) {
+      session.items.forEach(function (item) {
+        if (item.schedule) {
+          var startDay = dayIndexFromTime(item.schedule.start);
+          var endDay = item.schedule.end != null ? dayIndexFromTime(item.schedule.end) : startDay;
+          if (endDay < startDay) endDay = startDay;
+          events.push({
+            id: item.id,
+            text: item.text,
+            done: !!item.done,
+            sessionName: session.name,
+            start: item.schedule.start,
+            end: item.schedule.end,
+            startDay: startDay,
+            endDay: endDay
+          });
+        }
+      });
+    });
+    return events;
+  }
+
+  function assignEventRows(events) {
+    var sorted = events.slice().sort(function (a, b) {
+      return a.startDay - b.startDay || (b.endDay - b.startDay) - (a.endDay - a.startDay);
+    });
+    var rowEnds = [];
+    sorted.forEach(function (ev) {
+      var placedRow = -1;
+      for (var r = 0; r < rowEnds.length; r++) {
+        if (ev.startDay > rowEnds[r]) { placedRow = r; break; }
+      }
+      if (placedRow === -1) { placedRow = rowEnds.length; rowEnds.push(-Infinity); }
+      rowEnds[placedRow] = ev.endDay;
+      ev.row = placedRow;
+    });
+    return sorted;
+  }
+
+  function overlapCountOnDay(events, dayIdx) {
+    var count = 0;
+    for (var i = 0; i < events.length; i++) {
+      if (events[i].startDay <= dayIdx && dayIdx <= events[i].endDay) count++;
+    }
+    return count;
+  }
+
+  function colorForEvent(ev, events) {
+    if (ev.done) return GRAY;
+    var count = overlapCountOnDay(events, ev.startDay);
+    return RAINBOW[Math.min(Math.max(count, 1), RAINBOW.length) - 1];
+  }
+
+  function renderScheduleList(events) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cal-agenda';
+
+    var title = document.createElement('div');
+    title.className = 'cal-agenda-title';
+    title.textContent = '🗂 타임라인에 등록된 일정';
+    wrap.appendChild(title);
+
+    if (events.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'cal-agenda-empty';
+      empty.textContent = '날짜 형식으로 작성된 일정이 아직 없습니다.';
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    var list = document.createElement('div');
+    list.className = 'cal-agenda-list';
+
+    var sorted = events.slice().sort(function (a, b) { return a.start - b.start; });
+    sorted.forEach(function (ev) {
+      var row = document.createElement('div');
+      row.className = 'cal-agenda-item' + (ev.done ? ' done' : '');
+
+      var dot = document.createElement('span');
+      dot.className = 'cal-agenda-dot';
+      dot.style.background = colorForEvent(ev, events);
+      row.appendChild(dot);
+
+      var meta = document.createElement('div');
+      meta.className = 'cal-agenda-meta';
+
+      var when = document.createElement('div');
+      when.className = 'cal-agenda-when';
+      when.textContent = formatScheduleBadge({ start: ev.start, end: ev.end }).replace('🗓 ', '');
+      meta.appendChild(when);
+
+      var text = document.createElement('div');
+      text.className = 'cal-agenda-text';
+      text.textContent = ev.text;
+      meta.appendChild(text);
+
+      var session = document.createElement('div');
+      session.className = 'cal-agenda-session';
+      session.textContent = ev.sessionName;
+      meta.appendChild(session);
+
+      row.appendChild(meta);
+      list.appendChild(row);
+    });
+
+    wrap.appendChild(list);
+    return wrap;
+  }
+
+  function renderCalendar() {
+    var panel = document.getElementById('calendarPanel');
+    panel.innerHTML = '';
+
+    var events = assignEventRows(collectEvents());
+    panel.appendChild(renderScheduleList(events));
+
+    var legend = document.createElement('div');
+    legend.className = 'cal-legend';
+    var legendTitle = document.createElement('div');
+    legendTitle.textContent = '겹치는 일정 수에 따른 색상 (완료 항목은 회색)';
+    legendTitle.style.marginBottom = '4px';
+    legend.appendChild(legendTitle);
+    RAINBOW.forEach(function (color, i) {
+      var row = document.createElement('div');
+      row.className = 'cal-legend-row';
+      var dot = document.createElement('span');
+      dot.className = 'cal-legend-dot';
+      dot.style.background = color;
+      row.appendChild(dot);
+      var label = document.createElement('span');
+      label.textContent = (i + 1) + (i === RAINBOW.length - 1 ? '개 이상 겹침' : '개 겹침');
+      row.appendChild(label);
+      legend.appendChild(row);
+    });
+    panel.appendChild(legend);
+
+    var today = new Date();
+    for (var offset = -2; offset <= 9; offset++) {
+      var monthDate = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+      panel.appendChild(renderMonth(monthDate, events));
+    }
+  }
+
+  function renderMonth(monthDate, events) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cal-month';
+
+    var title = document.createElement('div');
+    title.className = 'cal-month-title';
+    title.textContent = monthDate.getFullYear() + '년 ' + (monthDate.getMonth() + 1) + '월';
+    wrap.appendChild(title);
+
+    var grid = document.createElement('div');
+    grid.className = 'cal-grid';
+    DOW.forEach(function (d) {
+      var dow = document.createElement('div');
+      dow.className = 'cal-dow';
+      dow.textContent = d;
+      grid.appendChild(dow);
+    });
+
+    var year = monthDate.getFullYear();
+    var month = monthDate.getMonth();
+    var first = new Date(year, month, 1);
+    var last = new Date(year, month + 1, 0);
+    var start = new Date(year, month, 1 - first.getDay());
+    var end = new Date(year, month, last.getDate() + (6 - last.getDay()));
+
+    var cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    while (cur.getTime() <= end.getTime()) {
+      grid.appendChild(renderDayCell(cur, events, cur.getMonth() === month));
+      cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+    }
+
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
+  function renderDayCell(date, events, isCurrentMonth) {
+    var cell = document.createElement('div');
+    cell.className = 'cal-day' + (isCurrentMonth ? '' : ' other-month');
+
+    var todayMid = new Date();
+    todayMid.setHours(0, 0, 0, 0);
+    if (date.getTime() === todayMid.getTime()) cell.classList.add('today');
+
+    var num = document.createElement('div');
+    num.className = 'cal-day-num';
+    num.textContent = date.getDate();
+    cell.appendChild(num);
+
+    var dayIdx = dayIndexFromDate(date);
+    var dayEvents = events.filter(function (ev) { return ev.startDay <= dayIdx && dayIdx <= ev.endDay; });
+    var count = dayEvents.length;
+    var colorForDay = RAINBOW[Math.min(Math.max(count, 1), RAINBOW.length) - 1];
+
+    var MAX_ROWS = 4;
+    var slots = [];
+    for (var i = 0; i < MAX_ROWS; i++) slots.push(null);
+    var overflow = 0;
+    dayEvents.forEach(function (ev) {
+      if (ev.row < MAX_ROWS) slots[ev.row] = ev;
+      else overflow++;
+    });
+
+    slots.forEach(function (ev) {
+      var bar = document.createElement('div');
+      bar.className = 'cal-bar';
+      if (ev) {
+        bar.style.background = ev.done ? GRAY : colorForDay;
+        bar.title = ev.text + ' · 겹침 ' + count + '건' + (ev.done ? ' (완료)' : '');
+      }
+      cell.appendChild(bar);
+    });
+    if (overflow > 0) {
+      var more = document.createElement('div');
+      more.className = 'cal-more';
+      more.textContent = '+' + overflow;
+      cell.appendChild(more);
+    }
+
+    return cell;
+  }
+
+  document.getElementById('addSessionBtn').addEventListener('click', addSession);
+  document.getElementById('syncConnectBtn').addEventListener('click', connectSyncFile);
+
+  renderAll();
+  renderSyncUI();
+  restoreSyncConnection();
+})();
+</script>
+
+</body>
+</html>
