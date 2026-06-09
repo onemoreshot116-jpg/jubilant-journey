@@ -42,7 +42,8 @@
     font-size: 13px; color: #2b2d31; background: #fff; width: 220px; outline: none;
   }
   .search-input:focus { border-color: #3b6ef0; }
-  .search-highlight { background: #fff3a3; border-radius: 2px; }
+  .search-highlight { background: #ccff66; border-radius: 2px; padding: 0 1px; }
+  li.item.search-match { background: #f2ffda; border-color: #a8e063; }
   .sync-bar { display: flex; align-items: center; gap: 10px; margin: 0 14px; }
   .sync-status { font-size: 11px; color: #9aa0a6; }
   .sync-btn {
@@ -1428,44 +1429,54 @@
 
   var searchQuery = '';
   var searchTimer = null;
+
+  function fuzzyMatch(text, query) {
+    // 완전 포함 먼저
+    if (text.includes(query)) return true;
+    // 공백 제거 후 포함 (붙여쓰기 대응)
+    if (text.replace(/\s/g, '').includes(query.replace(/\s/g, ''))) return true;
+    // 단어 단위 모두 포함 (부분 단어 검색)
+    var words = query.split(/\s+/).filter(Boolean);
+    return words.every(function (w) { return text.includes(w); });
+  }
+
   function applySearch() {
     var q = searchQuery.trim().toLowerCase();
-    var cards = document.querySelectorAll('.session-card-wrap');
-    cards.forEach(function (wrap) {
-      var items = wrap.querySelectorAll('li.item');
-      var visibleCount = 0;
-      items.forEach(function (li) {
-        var textEl = li.querySelector('.item-text');
-        var raw = textEl ? textEl.dataset.raw || textEl.textContent : '';
-        if (q === '' || raw.toLowerCase().includes(q)) {
+    var allItems = document.querySelectorAll('#board li.item');
+    allItems.forEach(function (li) {
+      var textEl = li.querySelector('.item-text');
+      if (!textEl) return;
+      // raw 텍스트 보존
+      var raw = textEl.dataset.raw || textEl.textContent;
+      textEl.dataset.raw = raw;
+      if (q === '') {
+        li.style.display = '';
+        li.classList.remove('search-match');
+        textEl.textContent = raw;
+      } else {
+        var lowerRaw = raw.toLowerCase();
+        if (fuzzyMatch(lowerRaw, q)) {
           li.style.display = '';
-          if (textEl && q !== '') {
-            var escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            textEl.innerHTML = raw.replace(new RegExp('(' + escaped + ')', 'gi'),
-              '<span class="search-highlight">$1</span>');
-          } else if (textEl) {
-            textEl.textContent = raw;
-          }
-          visibleCount++;
+          li.classList.add('search-match');
+          // 하이라이트: 매칭 부분에 형광색 표시
+          var escaped = q.replace(/\s/g, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          // 단순 포함 매칭이면 q 전체로, 아니면 단어별로
+          var hlPattern = raw.toLowerCase().includes(q)
+            ? q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            : q.split(/\s+/).filter(Boolean).map(function(w){ return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|');
+          textEl.innerHTML = raw.replace(new RegExp('(' + hlPattern + ')', 'gi'),
+            '<span class="search-highlight">$1</span>');
         } else {
           li.style.display = 'none';
+          li.classList.remove('search-match');
+          textEl.textContent = raw;
         }
-      });
+      }
     });
   }
 
   document.getElementById('searchInput').addEventListener('input', function () {
     searchQuery = this.value;
-    // store raw text on each item-text (only when no search active)
-    if (!searchQuery) {
-      document.querySelectorAll('.item-text').forEach(function (el) {
-        if (el.dataset.raw) el.textContent = el.dataset.raw;
-      });
-    } else {
-      document.querySelectorAll('.item-text').forEach(function (el) {
-        if (!el.dataset.raw) el.dataset.raw = el.textContent;
-      });
-    }
     clearTimeout(searchTimer);
     searchTimer = setTimeout(applySearch, 150);
   });
